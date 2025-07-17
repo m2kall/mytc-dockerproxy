@@ -2,7 +2,7 @@
   "name": "docker-registry-proxy",
   "version": "1.0.0",
   "description": "EdgeOne Pages Functions Docker Registry Proxy",
-  "main": "index.js",
+  "main": "multi-registry-proxy.js",
   "type": "module",
   "license": "MIT",
   "keywords": ["docker", "registry", "proxy", "edgeone", "pages-functions"]
