@@ -1,15 +1,14 @@
 /**
  * Container Registry Proxy for Docker Hub on Tencent EdgeOne Pages Functions
+ * 文件名: functions/[[path]].js
  */
 
 const UPSTREAM_REGISTRY = 'https://registry-1.docker.io';
 
-// EdgeOne Pages Functions 入口点
-export default {
-  async fetch(request, env, ctx) {
-    return handleRequest(request);
-  }
-};
+export async function onRequest(context) {
+  const { request, env, params } = context;
+  return handleRequest(request);
+}
 
 async function handleRequest(request) {
   const url = new URL(request.url);
