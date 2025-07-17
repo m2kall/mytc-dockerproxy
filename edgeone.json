@@ -6,7 +6,7 @@
         "mountPath": "/",
         "method": "",
         "module": [
-          "multi-registry-proxy.js:onRequest"
+          "functions/multi-registry-proxy.js:onRequest"
         ]
       }
     ]
