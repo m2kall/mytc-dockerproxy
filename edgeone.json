@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "routes": [
+      {
+        "routePath": "/*",
+        "mountPath": "/",
+        "method": "",
+        "module": [
+          "multi-registry-proxy.js:onRequest"
+        ]
+      }
+    ]
+  }
+}
