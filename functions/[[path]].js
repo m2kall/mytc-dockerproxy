@@ -1,12 +1,11 @@
 /**
  * Container Registry Proxy for Docker Hub on Tencent EdgeOne Pages Functions
- * 文件名: functions/[[path]].js
  */
 
 const UPSTREAM_REGISTRY = 'https://registry-1.docker.io';
 
 export async function onRequest(context) {
-  const { request, env, params } = context;
+  const { request } = context;
   return handleRequest(request);
 }
 
@@ -56,7 +55,7 @@ async function proxyDockerRequest(request, url) {
     // 复制必要的请求头，排除一些可能导致问题的头部
     for (const [key, value] of request.headers.entries()) {
       const lowerKey = key.toLowerCase();
-      if (!['host', 'origin', 'referer', 'cf-ray', 'cf-connecting-ip'].includes(lowerKey)) {
+      if (!['host', 'origin', 'referer', 'cf-ray', 'cf-connecting-ip', 'cf-visitor'].includes(lowerKey)) {
         newHeaders.set(key, value);
       }
     }
@@ -110,10 +109,10 @@ async function proxyDockerRequest(request, url) {
       }
     }
 
-    // 处理认证头
+    // 处理认证头 - 这是关键部分
     const wwwAuth = response.headers.get('Www-Authenticate');
     if (wwwAuth) {
-      // 替换认证 realm 为当前域名
+      // 替换认证 realm 为当前域名，保持其他参数不变
       const newWwwAuth = wwwAuth.replace(
         /realm="[^"]*"/,
         `realm="https://${url.hostname}/v2/auth"`
@@ -222,6 +221,13 @@ function createLandingPage(url) {
       border-radius: 5px;
       margin: 1em 0;
     }
+    .api-status {
+      background-color: #d4edda;
+      border: 1px solid #c3e6cb;
+      padding: 1em;
+      border-radius: 5px;
+      margin: 1em 0;
+    }
   </style>
 </head>
 <body>
@@ -229,12 +235,19 @@ function createLandingPage(url) {
     <h1>🐳 Docker Hub 代理服务</h1>
     <div class="status">✅ 服务运行正常</div>
     
-    <p>这是一个基于腾讯云 EdgeOne Pages Functions 的 Docker Hub 镜像代理服务。</p>
+    <div class="api-status">
+      <h3>📡 API 状态</h3>
+      <p>Docker Registry API v2: <strong>正常</strong></p>
+      <p>代理目标: registry-1.docker.io</p>
+    </div>
+    
+    <p>这是一个基于腾讯云 EdgeOne Pages Functions 的 Docker Hub 镜像代理服务，可以帮助您更快地拉取 Docker 镜像。</p>
     
     <div class="test-section">
       <h3>🧪 快速测试</h3>
-      <p>点击以下链接测试 API：</p>
-      <p><a href="/v2/" target="_blank">测试 Docker Registry API</a></p>
+      <p>API 端点测试：</p>
+      <p><a href="/v2/" target="_blank">测试 Docker Registry API (/v2/)</a></p>
+      <p><code>curl https://${proxyHost}/v2/</code></p>
     </div>
     
     <div class="usage">
@@ -252,12 +265,24 @@ function createLandingPage(url) {
       <pre><code># 拉取官方镜像
 docker pull ${proxyHost}/library/ubuntu:latest
 docker pull ${proxyHost}/library/nginx:alpine
+docker pull ${proxyHost}/library/node:18
 
 # 拉取用户镜像
 docker pull ${proxyHost}/username/imagename:tag
 
-# 测试 API
-curl https://${proxyHost}/v2/</code></pre>
+# 验证代理工作
+docker pull ${proxyHost}/library/hello-world</code></pre>
+    </div>
+    
+    <div class="usage">
+      <h2>🔧 高级用法</h2>
+      <h3>测试镜像清单</h3>
+      <pre><code># 获取镜像清单
+curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \\
+     https://${proxyHost}/v2/library/ubuntu/manifests/latest
+
+# 列出标签（需要认证）
+curl https://${proxyHost}/v2/library/ubuntu/tags/list</code></pre>
     </div>
     
     <div class="usage">
@@ -266,6 +291,7 @@ curl https://${proxyHost}/v2/</code></pre>
       <p>• 代理目标：Docker Hub (registry-1.docker.io)</p>
       <p>• 支持完整的 Docker Registry API v2</p>
       <p>• 自动处理认证和重定向</p>
+      <p>• 全球边缘节点加速</p>
     </div>
   </div>
 </body>
