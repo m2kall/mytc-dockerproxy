@@ -145,14 +145,25 @@ async function proxyRequest(request, url) {
       responseHeaders.set("Location", newLocation);
     }
 
-    // Rewrite Www-Authenticate header to point to our auth handler
+    // Robustly rewrite the Www-Authenticate header
     const wwwAuth = response.headers.get("Www-Authenticate");
     if (wwwAuth) {
-      const newWwwAuth = wwwAuth.replace(
-        /realm=\"[^\"]*\"/,
-        `realm=\"https://${url.hostname}/v2/auth\"`
-      );
-      responseHeaders.set("Www-Authenticate", newWwwAuth);
+      const authType = wwwAuth.split(" ")[0]; // "Bearer"
+      const params = {};
+      const paramRegex = /([a-zA-Z_]+)="([^"]*)"/g;
+      let match;
+      while ((match = paramRegex.exec(wwwAuth)) !== null) {
+        params[match[1]] = match[2];
+      }
+
+      if (params.realm) {
+        params.realm = `https://${url.hostname}/v2/auth`;
+        const newParams = Object.entries(params)
+          .map(([key, value]) => `${key}="${value}"`)
+          .join(",");
+        const newWwwAuth = `${authType} ${newParams}`;
+        responseHeaders.set("Www-Authenticate", newWwwAuth);
+      }
     }
 
     return new Response(response.body, {
