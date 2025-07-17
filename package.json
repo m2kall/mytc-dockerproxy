@@ -1,9 +1,9 @@
 {
   "name": "docker-registry-proxy",
   "version": "1.0.0",
-  "description": "EdgeOne Edge Functions Docker Registry Proxy",
+  "description": "EdgeOne Pages Functions Docker Registry Proxy",
   "main": "index.js",
   "type": "module",
   "license": "MIT",
-  "keywords": ["docker", "registry", "proxy", "edgeone"]
+  "keywords": ["docker", "registry", "proxy", "edgeone", "pages-functions"]
 }

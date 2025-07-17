@@ -1,23 +1,10 @@
 /**
- * Container Registry Proxy for Docker Hub on Tencent EdgeOne
+ * Container Registry Proxy for Docker Hub on Tencent EdgeOne Pages Functions
  */
 
 const UPSTREAM_REGISTRY = 'https://registry-1.docker.io';
 
-// EdgeOne 函数入口
-async function main_handler(event, context) {
-  // 从 event 中构建 Request 对象
-  const request = new Request(event.Records[0].cf.request.uri, {
-    method: event.Records[0].cf.request.method,
-    headers: event.Records[0].cf.request.headers,
-    body: event.Records[0].cf.request.body
-  });
-  
-  const response = await handleRequest(request);
-  return response;
-}
-
-// 也保留 fetch 格式以防万一
+// EdgeOne Pages Functions 入口点
 export default {
   async fetch(request, env, ctx) {
     return handleRequest(request);
@@ -27,10 +14,6 @@ export default {
 async function handleRequest(request) {
   const url = new URL(request.url);
   
-  console.log('Request URL:', request.url);
-  console.log('Request method:', request.method);
-  console.log('Request pathname:', url.pathname);
-  
   // 处理 CORS 预检请求
   if (request.method === 'OPTIONS') {
     return handleCORS();
@@ -39,6 +22,11 @@ async function handleRequest(request) {
   // 如果路径以 /v2/ 开头，这是 Docker API 请求
   if (url.pathname.startsWith('/v2/')) {
     return await proxyDockerRequest(request, url);
+  }
+
+  // 如果是 /v2 (没有尾部斜杠)，重定向到 /v2/
+  if (url.pathname === '/v2') {
+    return Response.redirect(new URL('/v2/', request.url).toString(), 301);
   }
 
   // 根路径返回说明页面
@@ -60,24 +48,27 @@ async function handleRequest(request) {
 
 async function proxyDockerRequest(request, url) {
   try {
-    console.log('Proxying Docker request:', url.pathname);
-    
     // 构建上游请求 URL
     const upstreamUrl = new URL(url.pathname + url.search, UPSTREAM_REGISTRY);
-    console.log('Upstream URL:', upstreamUrl.toString());
     
     // 创建新的请求头
     const newHeaders = new Headers();
     
-    // 复制必要的请求头
+    // 复制必要的请求头，排除一些可能导致问题的头部
     for (const [key, value] of request.headers.entries()) {
-      if (!['host', 'origin', 'referer'].includes(key.toLowerCase())) {
+      const lowerKey = key.toLowerCase();
+      if (!['host', 'origin', 'referer', 'cf-ray', 'cf-connecting-ip'].includes(lowerKey)) {
         newHeaders.set(key, value);
       }
     }
     
     // 设置正确的 Host 头
     newHeaders.set('Host', 'registry-1.docker.io');
+    
+    // 如果没有 User-Agent，添加一个
+    if (!newHeaders.has('User-Agent')) {
+      newHeaders.set('User-Agent', 'Docker/20.10.0 (linux)');
+    }
     
     // 创建代理请求
     const proxyRequest = new Request(upstreamUrl.toString(), {
@@ -88,7 +79,6 @@ async function proxyDockerRequest(request, url) {
 
     // 发送请求到上游服务器
     const response = await fetch(proxyRequest);
-    console.log('Upstream response status:', response.status);
     
     // 创建响应头
     const responseHeaders = new Headers();
@@ -107,10 +97,29 @@ async function proxyDockerRequest(request, url) {
     // 处理重定向响应中的 Location 头
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('Location');
-      if (location && location.includes('registry-1.docker.io')) {
-        const newLocation = location.replace('https://registry-1.docker.io', '');
+      if (location) {
+        let newLocation = location;
+        // 如果 location 包含 registry-1.docker.io，替换为当前域名
+        if (location.includes('registry-1.docker.io')) {
+          newLocation = location.replace('https://registry-1.docker.io', `https://${url.hostname}`);
+        }
+        // 如果 location 是相对路径，确保它指向当前域名
+        else if (location.startsWith('/')) {
+          newLocation = `https://${url.hostname}${location}`;
+        }
         responseHeaders.set('Location', newLocation);
       }
+    }
+
+    // 处理认证头
+    const wwwAuth = response.headers.get('Www-Authenticate');
+    if (wwwAuth) {
+      // 替换认证 realm 为当前域名
+      const newWwwAuth = wwwAuth.replace(
+        /realm="[^"]*"/,
+        `realm="https://${url.hostname}/v2/auth"`
+      );
+      responseHeaders.set('Www-Authenticate', newWwwAuth);
     }
 
     return new Response(response.body, {
@@ -121,9 +130,16 @@ async function proxyDockerRequest(request, url) {
     
   } catch (error) {
     console.error('Proxy error:', error);
-    return new Response('Proxy Error: ' + error.message, { 
+    return new Response(JSON.stringify({
+      error: 'Proxy Error',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    }), { 
       status: 500,
-      headers: getCORSHeaders()
+      headers: {
+        'Content-Type': 'application/json',
+        ...Object.fromEntries(getCORSHeaders())
+      }
     });
   }
 }
@@ -139,8 +155,8 @@ function getCORSHeaders() {
   return new Headers({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, Docker-Content-Digest, Docker-Distribution-Api-Version',
-    'Access-Control-Expose-Headers': 'Docker-Content-Digest, Docker-Distribution-Api-Version, Www-Authenticate, Location',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, Docker-Content-Digest, Docker-Distribution-Api-Version, Accept, Accept-Encoding',
+    'Access-Control-Expose-Headers': 'Docker-Content-Digest, Docker-Distribution-Api-Version, Www-Authenticate, Location, Content-Length, Content-Type',
     'Access-Control-Max-Age': '86400',
   });
 }
@@ -200,6 +216,13 @@ function createLandingPage(url) {
       font-weight: bold;
       margin-bottom: 1em;
     }
+    .test-section {
+      background-color: #fff3cd;
+      border: 1px solid #ffeaa7;
+      padding: 1em;
+      border-radius: 5px;
+      margin: 1em 0;
+    }
   </style>
 </head>
 <body>
@@ -207,27 +230,46 @@ function createLandingPage(url) {
     <h1>🐳 Docker Hub 代理服务</h1>
     <div class="status">✅ 服务运行正常</div>
     
-    <p>这是一个 Docker Hub 镜像代理服务，可以帮助您更快地拉取 Docker 镜像。</p>
+    <p>这是一个基于腾讯云 EdgeOne Pages Functions 的 Docker Hub 镜像代理服务。</p>
+    
+    <div class="test-section">
+      <h3>🧪 快速测试</h3>
+      <p>点击以下链接测试 API：</p>
+      <p><a href="/v2/" target="_blank">测试 Docker Registry API</a></p>
+    </div>
     
     <div class="usage">
       <h2>📖 使用方法</h2>
-      <p>在 Docker 镜像名称前添加代理地址 <code>${proxyHost}</code></p>
       
-      <h3>示例：</h3>
-      <pre><code># 拉取 Ubuntu 镜像
+      <h3>方法一：配置镜像源（推荐）</h3>
+      <p>编辑 <code>/etc/docker/daemon.json</code>：</p>
+      <pre><code>{
+  "registry-mirrors": ["https://${proxyHost}"]
+}</code></pre>
+      <p>然后重启 Docker：</p>
+      <pre><code>sudo systemctl restart docker</code></pre>
+      
+      <h3>方法二：直接拉取</h3>
+      <pre><code># 拉取官方镜像
 docker pull ${proxyHost}/library/ubuntu:latest
-
-# 拉取 Nginx 镜像  
 docker pull ${proxyHost}/library/nginx:alpine
 
+# 拉取用户镜像
+docker pull ${proxyHost}/username/imagename:tag
+
 # 测试 API
-curl ${proxyHost}/v2/</code></pre>
+curl https://${proxyHost}/v2/</code></pre>
+    </div>
+    
+    <div class="usage">
+      <h2>ℹ️ 技术信息</h2>
+      <p>• 基于腾讯云 EdgeOne Pages Functions</p>
+      <p>• 代理目标：Docker Hub (registry-1.docker.io)</p>
+      <p>• 支持完整的 Docker Registry API v2</p>
+      <p>• 自动处理认证和重定向</p>
     </div>
   </div>
 </body>
 </html>
   `;
 }
-
-// 导出主函数
-exports.main_handler = main_handler;
