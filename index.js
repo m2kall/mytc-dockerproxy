@@ -1,11 +1,23 @@
 /**
  * Container Registry Proxy for Docker Hub on Tencent EdgeOne
- * Handles /v2/ API requests for Docker registry
  */
 
 const UPSTREAM_REGISTRY = 'https://registry-1.docker.io';
 
-// EdgeOne 使用 export default 而不是 addEventListener
+// EdgeOne 函数入口
+async function main_handler(event, context) {
+  // 从 event 中构建 Request 对象
+  const request = new Request(event.Records[0].cf.request.uri, {
+    method: event.Records[0].cf.request.method,
+    headers: event.Records[0].cf.request.headers,
+    body: event.Records[0].cf.request.body
+  });
+  
+  const response = await handleRequest(request);
+  return response;
+}
+
+// 也保留 fetch 格式以防万一
 export default {
   async fetch(request, env, ctx) {
     return handleRequest(request);
@@ -15,18 +27,22 @@ export default {
 async function handleRequest(request) {
   const url = new URL(request.url);
   
+  console.log('Request URL:', request.url);
+  console.log('Request method:', request.method);
+  console.log('Request pathname:', url.pathname);
+  
   // 处理 CORS 预检请求
   if (request.method === 'OPTIONS') {
     return handleCORS();
   }
 
-  // 如果路径以 /v2/ 开头，这是 Docker API 请求，进行代理
+  // 如果路径以 /v2/ 开头，这是 Docker API 请求
   if (url.pathname.startsWith('/v2/')) {
     return await proxyDockerRequest(request, url);
   }
 
   // 根路径返回说明页面
-  if (url.pathname === '/') {
+  if (url.pathname === '/' || url.pathname === '') {
     return new Response(createLandingPage(url), {
       headers: { 
         'Content-Type': 'text/html; charset=utf-8',
@@ -44,15 +60,17 @@ async function handleRequest(request) {
 
 async function proxyDockerRequest(request, url) {
   try {
+    console.log('Proxying Docker request:', url.pathname);
+    
     // 构建上游请求 URL
     const upstreamUrl = new URL(url.pathname + url.search, UPSTREAM_REGISTRY);
+    console.log('Upstream URL:', upstreamUrl.toString());
     
-    // 创建新的请求头，移除一些可能导致问题的头部
+    // 创建新的请求头
     const newHeaders = new Headers();
     
     // 复制必要的请求头
     for (const [key, value] of request.headers.entries()) {
-      // 跳过一些可能导致问题的头部
       if (!['host', 'origin', 'referer'].includes(key.toLowerCase())) {
         newHeaders.set(key, value);
       }
@@ -70,6 +88,7 @@ async function proxyDockerRequest(request, url) {
 
     // 发送请求到上游服务器
     const response = await fetch(proxyRequest);
+    console.log('Upstream response status:', response.status);
     
     // 创建响应头
     const responseHeaders = new Headers();
@@ -201,26 +220,14 @@ docker pull ${proxyHost}/library/ubuntu:latest
 # 拉取 Nginx 镜像  
 docker pull ${proxyHost}/library/nginx:alpine
 
-# 拉取用户镜像
-docker pull ${proxyHost}/username/imagename:tag</code></pre>
-      
-      <h3>🔧 配置 Docker 守护进程（可选）</h3>
-      <p>您也可以配置 Docker 守护进程使用此代理：</p>
-      <pre><code># 编辑 /etc/docker/daemon.json
-{
-  "registry-mirrors": ["https://${proxyHost}"]
-}</code></pre>
-    </div>
-    
-    <div class="usage">
-      <h2>ℹ️ 说明</h2>
-      <p>• 此服务代理 Docker Hub 官方镜像仓库</p>
-      <p>• 支持所有 Docker Registry API v2 操作</p>
-      <p>• 自动处理认证和重定向</p>
-      <p>• 提供 CORS 支持</p>
+# 测试 API
+curl ${proxyHost}/v2/</code></pre>
     </div>
   </div>
 </body>
 </html>
   `;
 }
+
+// 导出主函数
+exports.main_handler = main_handler;
